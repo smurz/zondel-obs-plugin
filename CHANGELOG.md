@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+- Added end-user `README.md` (install, use, troubleshooting, build-from-source).
+- Added `docs/PROTOCOL.md` documenting the wire protocol.
+
 ### Internal
 - Branch protection on `main` will be enabled before v0.1.0 (Task 20): require PRs, `check-format` + `build-project` checks, linear history, 1 approval on PRs touching `src/`.
 

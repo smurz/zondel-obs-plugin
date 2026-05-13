@@ -1,59 +1,156 @@
-# OBS Plugin Template
+# Zondel for OBS Studio
 
-## Introduction
+A free OBS Studio plugin that routes your audio through [Zondel](https://zondel.net)
+for noise suppression, echo cancellation, EQ, gating, and AGC — without leaving OBS.
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+> **This plugin is a thin client.** All the audio processing happens inside the
+> Zondel desktop app. You need Zondel installed and running for this plugin to do
+> anything. Without Zondel, the plugin passes audio through unchanged.
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+---
 
-## Supported Build Environments
+## What it does
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+Adds a single audio filter — **Zondel Audio Processor** — that you can attach to
+any OBS audio source. The filter sends each audio frame to Zondel over a local
+named pipe, gets the processed audio back, and hands it to OBS. Round-trip
+latency is well under 1 ms.
 
-## Quick Start
+If Zondel isn't running, the filter passes audio through unchanged. Streams
+never go silent.
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+### Format support
 
-## Documentation
+The plugin handles **mono and stereo** sources at any common sample rate
+(44.1 / 48 / 96 kHz, etc.). It does this by:
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+- Downmixing stereo to mono before processing (Zondel processes mono only).
+- Resampling to 48 kHz with a 4-point Catmull-Rom cubic interpolator if your
+  OBS project isn't already at 48 kHz.
+- Chunking OBS's variable callback sizes into the 480-sample blocks Zondel needs.
 
-Suggested reading to get up and running:
+The processed mono signal is then broadcast back into both channels of stereo
+sources. If your source has more than 2 channels (5.1, 7.1), the filter passes
+audio through unchanged with a clear status message; surround support is
+planned for v2.
 
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
+## Requirements
 
-## GitHub Actions & CI
+- Windows 10 1809 or newer (x64; ARM64 is best-effort)
+- OBS Studio 31.1 or newer
+- [Zondel](https://zondel.net/download) — paid desktop app
 
-Default GitHub Actions workflows are available for the following repository actions:
+The plugin itself is free and GPLv2+. Zondel is a separate commercial product.
+This plugin does nothing useful without it; if you just want a free OBS noise
+filter, OBS already includes RNNoise out of the box.
 
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
+## Install
 
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
+### Option A — Installer (recommended)
 
-### Retrieving build artifacts
+1. Download `zondel-obs-plugin-vX.Y.Z-setup.exe` from the
+   [latest release](https://github.com/smurz/zondel-obs-plugin/releases/latest).
+2. Close OBS if it's open.
+3. Run the installer. It will detect your OBS install and place files in:
+   - `%ProgramFiles%\obs-studio\obs-plugins\64bit\zondel-obs-plugin.dll`
+   - `%ProgramFiles%\obs-studio\data\obs-plugins\zondel-obs-plugin\`
 
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
+Windows will show a SmartScreen warning because the installer is unsigned in
+v1 (see [Known issues](#known-issues)). Click "More info" → "Run anyway".
 
-### Building a Release
+### Option B — Manual (.zip)
 
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
+1. Download `zondel-obs-plugin-vX.Y.Z-windows-x64.zip`.
+2. Close OBS.
+3. Extract into your OBS install directory.
 
-## Signing and Notarizing on macOS
+## Use
 
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+1. Launch Zondel. Its icon should appear in the system tray.
+2. In OBS, right-click your mic (or other audio source) → **Filters**.
+3. Click **+** under "Audio/Video Filters" → choose **Zondel Audio Processor**.
+4. The Status indicator should read **● Connected**.
+
+All audio tuning happens inside the Zondel app. The OBS filter is just the pipe.
+
+## Troubleshooting
+
+**Status reads "Disconnected".** Zondel may have crashed or its pipe server
+didn't start. Restart Zondel.
+
+**My audio sounds the same with and without the filter.** Toggle Bypass on/off —
+you should hear a difference. If you don't, the format gate may have fired;
+check the status indicator. Common cause: your source has more than 2 channels,
+which is not supported in v1.
+
+**Audio glitches or pops only with this filter enabled.** The pipe round-trip
+is exceeding the timeout. Open the filter's Advanced section and raise Pipe
+timeout to 10 or 20 ms.
+
+**OBS crashed when I added the filter.** Please file an issue with your OBS
+version, Zondel version, plugin version, and `%APPDATA%/obs-studio/logs/`.
+
+## How it works
+
+```
+OBS source (any sample rate, mono or stereo, variable frame size)
+   │
+   ▼
+[downmix to mono] → [cubic resampler → 48 kHz] → [480-sample ring buffer]
+   │                                                       │
+   │                                                       ▼
+   │                                              \\.\pipe\Zondel → Zondel.App
+   │                                                       │
+   │                                                       ▼
+   │                                              [480-sample ring buffer]
+   ▼
+[cubic resampler → OBS rate] ← [pull from ring]
+   │
+   ▼
+[broadcast back to mono/stereo channels]
+```
+
+The plugin is ~1000 lines of C. It opens a Windows named pipe to Zondel, sends
+each 480-sample mono audio frame as float32 PCM with a 10-byte header (frame
+size, sample rate, channel count), and writes the response back into OBS's
+buffer. On any pipe error it falls back to pass-through.
+
+The wire protocol is documented in [docs/PROTOCOL.md](docs/PROTOCOL.md) — third
+parties are welcome to build their own bridges.
+
+## Known issues
+
+- **Installer is unsigned in v1.** Windows SmartScreen will warn. Click
+  "More info" → "Run anyway". v2 will ship with an EV-signed installer.
+- **Surround (5.1 / 7.1) sources pass through unprocessed.** v2 will add
+  surround downmix.
+- **Voice-grade cubic resampler.** Sufficient for the SRC fallback path
+  (most users are at 48 kHz already and don't trigger SRC). If real-world
+  quality complaints surface, v1.1 will swap to Speex.
+- **OBS plugin auto-update** isn't supported by OBS itself; check this repo's
+  Releases page or watch the repo for updates.
+
+## Build from source
+
+```powershell
+git clone https://github.com/smurz/zondel-obs-plugin.git
+cd zondel-obs-plugin
+cmake --preset windows-x64
+cmake --build --preset windows-x64 --config RelWithDebInfo
+```
+
+Requires Visual Studio 2022 or 2026, CMake 3.28+, Windows SDK. OBS dependencies
+are fetched automatically via `buildspec.json`.
+
+## License
+
+GPLv2+, same as OBS Studio. See [LICENSE](LICENSE).
+
+## Issues and support
+
+- Plugin bugs: [GitHub issues](https://github.com/smurz/zondel-obs-plugin/issues)
+- Zondel app bugs or DSP feedback: <https://zondel.net/support>
+
+---
+
+*Not affiliated with the OBS Project. Uses the public OBS Studio plugin API.*
