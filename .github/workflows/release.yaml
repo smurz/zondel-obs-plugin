@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-project.yaml
+
+  installer:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Artifact name includes pluginName, version, and commit hash, e.g.:
+      #   "Zondel Audio Processor-0.1.0-windows-x64-abc123456"
+      # We use pattern: with a wildcard since the exact commit hash is unknown here.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ needs.build.outputs.pluginName }}-*-windows-x64-*
+          merge-multiple: true
+          path: artifact/
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Stage files for installer
+        shell: pwsh
+        run: |
+          # Unzip the build artifact into the layout installer.iss expects.
+          # The cmake install inside the zip has:
+          #   obs-plugins/64bit/zondel-obs-plugin.dll
+          #   data/obs-plugins/zondel-obs-plugin/locale/en-US.ini
+          # installer.iss expects them at:
+          #   build_x64\rundir\RelWithDebInfo\zondel-obs-plugin.dll
+          #   build_x64\rundir\RelWithDebInfo\zondel-obs-plugin\locale\en-US.ini
+          $zip = Get-ChildItem -Path artifact -Filter *.zip | Select-Object -First 1
+          if (-not $zip) { throw "No .zip artifact found in artifact/" }
+          Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
+
+          $relDir = "build_x64\rundir\RelWithDebInfo"
+          New-Item -ItemType Directory -Force -Path "$relDir\zondel-obs-plugin\locale" | Out-Null
+
+          # Copy DLL
+          $dll = Get-ChildItem staging -Recurse -Filter zondel-obs-plugin.dll | Select-Object -First 1
+          if (-not $dll) { throw "zondel-obs-plugin.dll not found in artifact zip" }
+          Copy-Item $dll.FullName -Destination "$relDir\zondel-obs-plugin.dll"
+
+          # Copy locale
+          $ini = Get-ChildItem staging -Recurse -Filter en-US.ini | Select-Object -First 1
+          if (-not $ini) { throw "en-US.ini not found in artifact zip" }
+          Copy-Item $ini.FullName -Destination "$relDir\zondel-obs-plugin\locale\en-US.ini"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$version installer\installer.iss
+
+      - name: Sign installer (if cert configured)
+        if: ${{ env.SIGNING_CERT_BASE64 != '' }}
+        shell: pwsh
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:SIGNING_CERT_BASE64)
+          Set-Content -Path cert.pfx -Value $bytes -AsByteStream
+          & "$env:WindowsSdkVerBinPath\x64\signtool.exe" sign /f cert.pfx /p $env:SIGNING_CERT_PASSWORD `
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 installer\Output\*.exe
+          Remove-Item cert.pfx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/Output/*.exe
+
+  release:
+    needs: [build, installer]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Compute SHA-256 manifest
+        run: |
+          cd dist
+          find . -type f \( -name "*.zip" -o -name "*.exe" \) -exec sha256sum {} \; > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          bash build-aux/extract-changelog.sh "${{ github.ref_name }}" > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "Initial release." > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/**/*.zip
+            dist/**/*.exe
+            dist/SHA256SUMS.txt
