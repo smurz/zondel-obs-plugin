@@ -6,25 +6,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Documentation
-- Added end-user `README.md` (install, use, troubleshooting, build-from-source).
-- Added `docs/PROTOCOL.md` documenting the wire protocol.
+## [0.1.0-beta.1] - 2026-05-13
 
-### Internal
-- Branch protection on `main` will be enabled before v0.1.0 (Task 20): require PRs, `check-format` + `build-project` checks, linear history, 1 approval on PRs touching `src/`.
-
-## [0.1.0] - TBD-on-first-tag
+First public beta. The plugin's source ID (`zondel_audio_filter`) is **not yet
+frozen** during the v0.x series — scene-collection compatibility guarantees
+begin at v1.0.0.
 
 ### Added
-- Initial beta release.
 - OBS audio filter `zondel_audio_filter` (display: "Zondel Audio Processor").
-- Win32 named-pipe client targeting `\\.\pipe\Zondel`.
-- Properties UI: Bypass toggle, Status indicator, Open Zondel button, advanced (pipe endpoint, pipe timeout 1-20 ms default 5 ms).
-- Format adaptation in the plugin: handles mono + stereo at 8/16/24/32/44.1/48/96 kHz via downmix and 4-point Catmull-Rom cubic resampler with 480-sample chunking ring buffer.
-- Back-off circuit breaker on repeated failures.
+- Win32 named-pipe client targeting `\\.\pipe\Zondel` with overlapped I/O,
+  5 ms hard timeout, close-and-reconnect on timeout.
+- Properties UI: Bypass toggle, Status indicator, Open Zondel button, Advanced
+  group (pipe endpoint, pipe timeout 1-20 ms, default 5 ms).
+- Format adaptation in the plugin: handles mono + stereo at 8/16/24/32/44.1/48/96 kHz
+  via downmix and 4-point Catmull-Rom cubic resampler with 480-sample chunking
+  ring buffer.
+- Back-off circuit breaker: 3 consecutive pipe failures → 2 s pass-through window.
+- End-user `README.md` (install, use, troubleshooting, build-from-source).
+- Public `docs/PROTOCOL.md` documenting the wire protocol.
+- Inno Setup installer (`zondel-obs-plugin-vX.Y.Z-setup.exe`).
+- GitHub Actions release workflow producing `.zip`, `.exe`, and `SHA256SUMS.txt`
+  on every `v*.*.*` tag.
+- Branch protection on `main`: PR-required, `check-format` + `build-project`
+  must pass, linear history, 1 approval on PRs touching `src/`.
 
 ### Known limitations
 - Windows-only. Linux/macOS scaffolding exists as stubs but is not built.
-- Sources with more than 2 channels (5.1/7.1) are passed through unprocessed (v2 will add surround downmix).
-- Resampler is voice-grade cubic; if quality complaints surface in beta we may swap in Speex for v1.1.
-- Installer is unsigned; SmartScreen will warn users.
+- Sources with more than 2 channels (5.1/7.1) are passed through unprocessed
+  (v2 will add surround downmix).
+- Resampler is voice-grade cubic; if quality complaints surface in beta we may
+  swap in Speex for v1.1.
+- Installer is **unsigned**; SmartScreen will warn users.
+- ARM64 Windows builds are best-effort (matrix `continue-on-error`); hardened
+  in v1.1.
