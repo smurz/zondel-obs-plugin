@@ -29,10 +29,14 @@
 # Exclude CMake build number cache
 /cmake/.CMakeBuildNumber
 
+# Installer sources are tracked; only exclude the compiled output
+!/installer
+!/installer/**
+installer/Output/
+
 # Local additions
 build/
 build_x64/
 build_arm64/
-installer/Output/
 .vs/
 *.user
