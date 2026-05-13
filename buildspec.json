@@ -19,6 +19,11 @@
             }
         }
     },
+    "platformConfig": {
+        "macos": {
+            "bundleId": "net.zondel.obs-plugin"
+        }
+    },
     "name": "zondel-obs-plugin",
     "displayName": "Zondel Audio Processor",
     "version": "0.1.0",

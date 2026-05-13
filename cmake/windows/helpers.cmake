@@ -24,12 +24,14 @@ function(set_target_properties_plugin target)
 
   install(TARGETS ${target} RUNTIME DESTINATION "${target}/bin/64bit" LIBRARY DESTINATION "${target}/bin/64bit")
 
-  install(
-    FILES "$<TARGET_PDB_FILE:${target}>"
-    CONFIGURATIONS RelWithDebInfo Debug Release
-    DESTINATION "${target}/bin/64bit"
-    OPTIONAL
-  )
+  if(CMAKE_VERSION VERSION_LESS "4.0")
+    install(
+      FILES "$<TARGET_PDB_FILE:${target}>"
+      CONFIGURATIONS RelWithDebInfo Debug Release
+      DESTINATION "${target}/bin/64bit"
+      OPTIONAL
+    )
+  endif()
 
   if(TARGET plugin-support)
     target_link_libraries(${target} PRIVATE plugin-support)
@@ -41,7 +43,6 @@ function(set_target_properties_plugin target)
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:${target}>"
-      "$<$<CONFIG:Debug,RelWithDebInfo,Release>:$<TARGET_PDB_FILE:${target}>>"
       "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>"
     COMMENT "Copy ${target} to rundir"
     VERBATIM

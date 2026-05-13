@@ -18,7 +18,11 @@ function(_check_dependencies_macos)
   set(qt6_destination "obs-deps-qt6-VERSION-ARCH")
   set(obs-studio_filename "VERSION.tar.gz")
   set(obs-studio_destination "obs-studio-VERSION")
-  set(dependencies_list prebuilt qt6 obs-studio)
+  if(ENABLE_QT)
+    set(dependencies_list prebuilt qt6 obs-studio)
+  else()
+    set(dependencies_list prebuilt obs-studio)
+  endif()
 
   _check_dependencies()
 
