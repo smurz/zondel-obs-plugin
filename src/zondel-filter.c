@@ -7,11 +7,26 @@
 #include <plugin-support.h>
 #include "zondel-filter.h"
 #include "zondel-state.h"
+#include "zondel-launch.h"
 #include "pipe-client.h"
 #include "ring-buffer.h"
 #include "resampler.h"
 #include "downmix.h"
 #include <util/platform.h>
+
+static const char *status_text_for(int status, uint64_t now_ns_, uint64_t backoff_until_ns) {
+    switch (status) {
+        case ZS_CONNECTED:           return obs_module_text("Zondel.Status.Connected");
+        case ZS_CONNECTING:          return obs_module_text("Zondel.Status.Connecting");
+        case ZS_DISCONNECTED:        return obs_module_text("Zondel.Status.Disconnected");
+        case ZS_UNSUPPORTED_FORMAT:  return obs_module_text("Zondel.Status.Unsupported");
+        case ZS_BACKED_OFF: {
+            (void)now_ns_; (void)backoff_until_ns;
+            return obs_module_text("Zondel.Status.BackedOff");
+        }
+        default:                     return obs_module_text("Zondel.Status.NotRunning");
+    }
+}
 
 typedef struct zondel_filter {
     obs_source_t   *source;
@@ -245,10 +260,44 @@ static struct obs_audio_data *zondel_filter_audio(void *data, struct obs_audio_d
     return audio;
 }
 
+static bool open_zondel_clicked(obs_properties_t *props, obs_property_t *prop, void *data) {
+    (void)props; (void)prop; (void)data;
+    zondel_launch_open_app();
+    return false;
+}
+
 static obs_properties_t *zondel_get_properties(void *data) {
-    (void)data;
+    zondel_filter_t *f = data;
     obs_properties_t *p = obs_properties_create();
+
+    /* Status (read-only info text, rebuilt on every property-pane refresh). */
+    int status = f ? f->state.status : ZS_UNKNOWN;
+    obs_property_t *status_prop = obs_properties_add_text(
+        p, "status", status_text_for(status, now_ns_(),
+                                     f ? f->state.backoff_until_ns : 0),
+        OBS_TEXT_INFO);
+    (void)status_prop;
+
+    /* Bypass toggle. */
     obs_properties_add_bool(p, "bypass", obs_module_text("Zondel.Property.Bypass"));
+
+    /* Open Zondel button. */
+    obs_properties_add_button(p, "open_zondel",
+                              obs_module_text("Zondel.Property.OpenZondel"),
+                              open_zondel_clicked);
+
+    /* Advanced group (collapsed by default in OBS UI when added as group). */
+    obs_properties_t *adv = obs_properties_create();
+    obs_properties_add_text(adv, "pipe_endpoint",
+                            obs_module_text("Zondel.Property.PipeEndpoint"),
+                            OBS_TEXT_DEFAULT);
+    obs_properties_add_int_slider(adv, "pipe_timeout_ms",
+                                  obs_module_text("Zondel.Property.PipeTimeout"),
+                                  1, 20, 1);
+    obs_properties_add_group(p, "advanced",
+                             obs_module_text("Zondel.Property.Advanced"),
+                             OBS_GROUP_NORMAL, adv);
+
     return p;
 }
 
@@ -257,16 +306,32 @@ static void zondel_update(void *data, obs_data_t *settings) {
     if (!f) return;
     zondel_state_set_bypass(&f->state, obs_data_get_bool(settings, "bypass") ? 1 : 0);
 
-    /* Allow recovery from UNSUPPORTED_FORMAT next callback. */
     if (f->state.status == ZS_UNSUPPORTED_FORMAT) {
         f->state.status = ZS_UNKNOWN;
         f->state.logged_unsupported_format = 0;
     }
 
-    /* Drop any pending ring contents so a sample-rate change doesn't surface
-     * stale audio. */
+    /* Drop any pending ring contents so a sample-rate change doesn't surface stale audio. */
     ring_buffer_reset(&f->send_ring);
     ring_buffer_reset(&f->recv_ring);
+
+    const char *ep = obs_data_get_string(settings, "pipe_endpoint");
+    if (ep && *ep && strcmp(ep, f->pipe_name) != 0) {
+        strncpy(f->pipe_name, ep, sizeof(f->pipe_name) - 1);
+        if (f->pipe) pipe_client_destroy(f->pipe);
+        f->pipe = pipe_client_create(f->pipe_name);
+    }
+
+    int timeout_ms = (int)obs_data_get_int(settings, "pipe_timeout_ms");
+    if (timeout_ms >= 1 && timeout_ms <= 20)
+        f->timeout_us = (uint32_t)timeout_ms * 1000;
+}
+
+static void zondel_tick(void *data, float seconds) {
+    zondel_filter_t *f = data;
+    (void)seconds;
+    if (!f) return;
+    obs_source_update_properties(f->source);
 }
 
 struct obs_source_info zondel_filter_info = {
@@ -280,4 +345,5 @@ struct obs_source_info zondel_filter_info = {
     .get_defaults  = zondel_get_defaults,
     .get_properties = zondel_get_properties,
     .filter_audio  = zondel_filter_audio,
+    .video_tick    = zondel_tick,    /* runs on UI thread; cheap */
 };
