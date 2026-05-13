@@ -17,12 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Artifact name includes pluginName, version, and commit hash, e.g.:
-      #   "Zondel Audio Processor-0.1.0-windows-x64-abc123456"
-      # We use pattern: with a wildcard since the exact commit hash is unknown here.
+      # Artifact name pattern: "<buildspec.name>-<version>-windows-x64-<short-sha>".
+      # The build-project.yaml workflow_call output `pluginName` exposes the
+      # `displayName` from buildspec.json (e.g. "Zondel Audio Processor"), NOT
+      # the `name` field used in artifact uploads. So we match by literal repo
+      # name with a wildcard for the version + hash tail.
       - uses: actions/download-artifact@v4
         with:
-          pattern: ${{ needs.build.outputs.pluginName }}-*-windows-x64-*
+          pattern: zondel-obs-plugin-*-windows-x64-*
           merge-multiple: true
           path: artifact/
 
@@ -39,8 +41,14 @@ jobs:
           # installer.iss expects them at:
           #   build_x64\rundir\RelWithDebInfo\zondel-obs-plugin.dll
           #   build_x64\rundir\RelWithDebInfo\zondel-obs-plugin\locale\en-US.ini
-          $zip = Get-ChildItem -Path artifact -Filter *.zip | Select-Object -First 1
-          if (-not $zip) { throw "No .zip artifact found in artifact/" }
+          if (-not (Test-Path artifact)) {
+            throw "artifact/ directory was not created by download-artifact - the pattern matched zero artifacts. Check the artifact name pattern."
+          }
+          $zip = Get-ChildItem -Path artifact -Recurse -Filter *.zip | Select-Object -First 1
+          if (-not $zip) {
+            $contents = Get-ChildItem -Path artifact -Recurse | ForEach-Object { $_.FullName }
+            throw "No .zip artifact found in artifact/. Contents:`n$($contents -join "`n")"
+          }
           Expand-Archive -Path $zip.FullName -DestinationPath staging -Force
 
           $relDir = "build_x64\rundir\RelWithDebInfo"
