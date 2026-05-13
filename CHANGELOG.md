@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Internal
+- Branch protection on `main` will be enabled before v0.1.0 (Task 20): require PRs, `check-format` + `build-project` checks, linear history, 1 approval on PRs touching `src/`.
+
 ## [0.1.0] - TBD-on-first-tag
 
 ### Added
