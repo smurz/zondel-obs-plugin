@@ -103,10 +103,67 @@ static void test_no_server_returns_not_connected_quickly(void) {
     pipe_client_destroy(c);
 }
 
+static void test_timeout_closes_handle_and_next_call_reconnects(void) {
+    HANDLE srv = start_fake_server("ZondelTestSlow", "sleep-ms:100");
+    if (!srv) { EXPECT(0, "could not start fake server"); return; }
+
+    pipe_client_t *c = pipe_client_create("\\\\.\\pipe\\ZondelTestSlow");
+    EXPECT(c != NULL, "create");
+
+    float send[480] = {0}, recv[480] = {0};
+
+    /* First call: 5 ms timeout but server sleeps 100 ms -> timeout */
+    int rc = pipe_client_send_recv(c, send, recv, 480, 48000, 1, 5000);
+    EXPECT(rc == PIPE_ERR_READ_TIMEOUT, "expected READ_TIMEOUT");
+    EXPECT(pipe_client_state(c) == PIPE_DISCONNECTED, "should be DISCONNECTED after timeout");
+
+    /* The slow server can only serve one connection at a time, but its sleep
+     * happens after read. Stop it to allow a fresh server for the reconnect test. */
+    stop_fake_server(srv);
+
+    /* Restart in echo mode so the next call succeeds against a fresh handle. */
+    HANDLE srv2 = start_fake_server("ZondelTestSlow", "echo");
+    if (!srv2) { EXPECT(0, "could not start fake server 2"); pipe_client_destroy(c); return; }
+
+    int rc2 = pipe_client_send_recv(c, send, recv, 480, 48000, 1, 5000);
+    EXPECT(rc2 == PIPE_OK, "second call should reconnect on fresh handle and succeed");
+    EXPECT(pipe_client_state(c) == PIPE_CONNECTED, "should be CONNECTED after recovery");
+
+    pipe_client_destroy(c);
+    stop_fake_server(srv2);
+}
+
+static void test_repeated_timeouts_do_not_leak_handles(void) {
+    /* Spin up 10 slow servers in sequence; each connection times out. We don't
+     * have a portable way to query "handles in use by this process" without
+     * Windows debug APIs, but the very-loose check is that we can do this 10
+     * times without crashing or exhausting the system. */
+    for (int i = 0; i < 10; i++) {
+        char pipe[64];
+        snprintf(pipe, sizeof(pipe), "ZondelTestLeak%d", i);
+
+        HANDLE srv = start_fake_server(pipe, "sleep-ms:100");
+        if (!srv) { EXPECT(0, "could not start fake server (leak test)"); return; }
+
+        char endpoint[128];
+        snprintf(endpoint, sizeof(endpoint), "\\\\.\\pipe\\%s", pipe);
+        pipe_client_t *c = pipe_client_create(endpoint);
+
+        float send[480] = {0}, recv[480] = {0};
+        int rc = pipe_client_send_recv(c, send, recv, 480, 48000, 1, 5000);
+        EXPECT(rc == PIPE_ERR_READ_TIMEOUT, "expected timeout in leak loop");
+
+        pipe_client_destroy(c);
+        stop_fake_server(srv);
+    }
+}
+
 int main(void) {
     test_no_server_returns_not_connected_quickly();
     test_round_trip_echo();
     test_bad_header_returns_protocol_error();
+    test_timeout_closes_handle_and_next_call_reconnects();
+    test_repeated_timeouts_do_not_leak_handles();
     if (failures) { fprintf(stderr, "%d test failure(s)\n", failures); return 1; }
     fprintf(stderr, "all tests passed\n");
     return 0;
