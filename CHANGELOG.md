@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-05-13
+
+Patch beta. The `v0.1.0-beta.1` tag was published but its release-packaging
+workflow failed (artifact-download pattern referenced `displayName` instead
+of `name`, so no artifacts were downloaded). No GitHub Release was created
+for beta.1; this beta supersedes it.
+
+### Fixed
+- `release.yaml`: artifact-pattern uses literal repo name `zondel-obs-plugin`
+  not the `displayName` output, and added a defensive guard with a clearer
+  error if the pattern matches nothing.
+
 ## [0.1.0-beta.1] - 2026-05-13
 
 First public beta. The plugin's source ID (`zondel_audio_filter`) is **not yet
