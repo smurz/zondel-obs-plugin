@@ -44,6 +44,45 @@ static void stop_fake_server(HANDLE h) {
     CloseHandle(h);
 }
 
+static void test_round_trip_echo(void) {
+    HANDLE srv = start_fake_server("ZondelTestEcho", "echo");
+    if (!srv) { EXPECT(0, "could not start fake server"); return; }
+
+    pipe_client_t *c = pipe_client_create("\\\\.\\pipe\\ZondelTestEcho");
+    EXPECT(c != NULL, "create");
+
+    float send[480];
+    float recv[480];
+    for (int i = 0; i < 480; i++) send[i] = (float)i * 0.001f;
+    memset(recv, 0, sizeof(recv));
+
+    int rc = pipe_client_send_recv(c, send, recv, 480, 48000, 1, 5000);
+    EXPECT(rc == PIPE_OK, "round-trip failed");
+    EXPECT(pipe_client_state(c) == PIPE_CONNECTED, "state should be CONNECTED");
+
+    for (int i = 0; i < 480; i++) {
+        if (recv[i] != send[i]) { EXPECT(0, "echo payload mismatch"); break; }
+    }
+
+    pipe_client_destroy(c);
+    stop_fake_server(srv);
+}
+
+static void test_bad_header_returns_protocol_error(void) {
+    HANDLE srv = start_fake_server("ZondelTestBad", "bad-header");
+    if (!srv) { EXPECT(0, "could not start fake server"); return; }
+
+    pipe_client_t *c = pipe_client_create("\\\\.\\pipe\\ZondelTestBad");
+    EXPECT(c != NULL, "create");
+
+    float send[480] = {0}, recv[480] = {0};
+    int rc = pipe_client_send_recv(c, send, recv, 480, 48000, 1, 5000);
+    EXPECT(rc == PIPE_ERR_PROTOCOL, "expected PROTOCOL error on bad header");
+
+    pipe_client_destroy(c);
+    stop_fake_server(srv);
+}
+
 static void test_no_server_returns_not_connected_quickly(void) {
     pipe_client_t *c = pipe_client_create("\\\\.\\pipe\\ZondelTestNobody");
     EXPECT(c != NULL, "create returned NULL");
@@ -66,6 +105,8 @@ static void test_no_server_returns_not_connected_quickly(void) {
 
 int main(void) {
     test_no_server_returns_not_connected_quickly();
+    test_round_trip_echo();
+    test_bad_header_returns_protocol_error();
     if (failures) { fprintf(stderr, "%d test failure(s)\n", failures); return 1; }
     fprintf(stderr, "all tests passed\n");
     return 0;
